@@ -1,0 +1,37 @@
+ext {
+    versionFile = file('version.properties')
+    if (!versionFile.exists()) {
+        versionFile.text = 'version=0.0.1'
+        println "Created version.properties with version 0.0.1"
+    }
+
+    getCurrentVersion = {
+        def props = new Properties()
+        versionFile.withInputStream { props.load(it) }
+        return props.version ?: '0.0.1'
+    }
+
+    incrementVersion = {
+        def props = new Properties()
+        versionFile.withInputStream { props.load(it) }
+
+        def current = props.version ?: '0.0.1'
+        def parts = current.split('\\.')
+        parts[2] = (parts[2].toInteger() + 1).toString()
+        def newVersion = parts.join('.')
+
+        props.version = newVersion
+        versionFile.withOutputStream { props.store(it, null) }
+
+        println "Version: $current → $newVersion"
+        return newVersion
+    }
+}
+
+version = getCurrentVersion()
+
+tasks.register('newVersion') {
+    doLast {
+        incrementVersion()
+    }
+}
