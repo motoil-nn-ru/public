@@ -27,8 +27,8 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew publish \
-            -PmotulNexusUrl="https://nexus.motoil-nn.ru/repository/maven-public/" \
-            -PmotulNexusPublishingUrl="https://nexus.motoil-nn.ru/repository/maven-releases/" \
+            -PmotulNexusUrl="${{ secrets.CI_NEXUS_URL }}/repository/maven-public/" \
+            -PmotulNexusPublishingUrl="${{ secrets.CI_NEXUS_URL }}/repository/maven-releases/" \
             -PmotulNexusUser="${{ secrets.CI_NEXUS_USER }}" \
             -PmotulNexusPassword="${{ secrets.CI_NEXUS_PASSWORD }}" \
             -x test
