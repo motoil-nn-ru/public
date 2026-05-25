@@ -27,6 +27,7 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew publish \
+            --refresh-dependencies \
             -PmotulNexusUrl="${{ secrets.CI_NEXUS_URL }}/repository/maven-public/" \
             -PmotulNexusPublishingUrl="${{ secrets.CI_NEXUS_URL }}/repository/maven-releases/" \
             -PmotulNexusUser="${{ secrets.CI_NEXUS_USER }}" \
