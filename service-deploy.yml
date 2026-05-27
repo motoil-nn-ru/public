@@ -1,0 +1,74 @@
+name: Reusable Deploy
+
+on:
+  workflow_call:
+    secrets:
+      NEXUS_HOST:
+        required: true
+      NEXUS_USER:
+        required: true
+      NEXUS_PASSWORD:
+        required: true
+      DEPLOY_HOST:
+        required: true
+      DEPLOY_USER:
+        required: true
+      DEPLOY_SSH_KEY:
+        required: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set service name
+        id: meta
+        run: echo "service=${{ github.event.repository.name }}" >> $GITHUB_OUTPUT
+
+      - name: Extract version
+        id: version
+        run: |
+          VERSION=$(grep 'version=' version.properties | cut -d'=' -f2 | xargs)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Check if JAR exists in Nexus
+        id: check
+        run: |
+          ITEMS=$(curl -s \
+            -u "${{ secrets.NEXUS_USER }}:${{ secrets.NEXUS_PASSWORD }}" \
+            "https://${{ secrets.NEXUS_HOST }}/service/rest/v1/search/assets?repository=maven-releases&maven.groupId=ru.motoil-nn&maven.artifactId=${{ steps.meta.outputs.service }}&maven.baseVersion=${{ steps.version.outputs.version }}&maven.extension=jar" \
+            | grep -c '"downloadUrl"' || true)
+          if [ "$ITEMS" -gt "0" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - uses: actions/setup-java@v4
+        if: steps.check.outputs.exists == 'false'
+        with:
+          java-version: '25'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Publish to Nexus
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          chmod +x gradlew
+          ./gradlew publish \
+            -PmotulNexusUrl="https://${{ secrets.NEXUS_HOST }}/repository/maven-public/" \
+            -PmotulNexusPublishingUrl="https://${{ secrets.NEXUS_HOST }}/repository/maven-releases/" \
+            -PmotulNexusUser="${{ secrets.NEXUS_USER }}" \
+            -PmotulNexusPassword="${{ secrets.NEXUS_PASSWORD }}" \
+            -x test
+
+      - name: Deploy to server
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            cd /opt/motul/${{ steps.meta.outputs.service }}
+            docker compose up -d --build
