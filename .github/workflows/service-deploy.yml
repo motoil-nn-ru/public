@@ -71,4 +71,5 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
             cd /opt/motul
-            docker compose up -d --build ${{ steps.meta.outputs.service }}
+            docker compose build --no-cache ${{ steps.meta.outputs.service }}
+            docker compose up -d ${{ steps.meta.outputs.service }}
