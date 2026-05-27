@@ -70,5 +70,5 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
-            cd /opt/motul/${{ steps.meta.outputs.service }}
-            docker compose up -d --build
+            cd /opt/motul
+            docker compose up -d --build ${{ steps.meta.outputs.service }}
