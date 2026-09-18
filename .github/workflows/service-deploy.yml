@@ -70,6 +70,14 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
+            # config-server отдаёт конфиги с volume-mount ./infrastructure/config-server/configs -
+            # это отдельный git checkout (свой репозиторий motoil-nn-ru/config-server), который
+            # НЕ обновляется деплоем этого workflow сам по себе (docker compose build/up ниже
+            # трогает только контейнер ${{ steps.meta.outputs.service }}). Без этого шага новые
+            # конфиги реально попадают на сервер только при ручном git pull - см. инцидент
+            # 2026-09-17 (notification-service падал на старте из-за отсутствующего в config-server
+            # свойства, которое уже было замержено в main, но не подтянуто на сервере).
+            cd /opt/motul/infrastructure/config-server && git pull --ff-only
             cd /opt/motul
             docker compose build --no-cache ${{ steps.meta.outputs.service }}
             docker compose rm -sf ${{ steps.meta.outputs.service }}

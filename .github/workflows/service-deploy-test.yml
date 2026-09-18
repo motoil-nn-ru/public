@@ -73,6 +73,12 @@ jobs:
           key: ${{ secrets.TEST_DEPLOY_SSH_KEY }}
           port: ${{ secrets.TEST_DEPLOY_PORT }}
           script: |
+            # См. комментарий в service-deploy.yml (Reusable Deploy) - тот же разрыв, тот же фикс.
+            # Путь тестового checkout config-server не подтверждён (по .env.test.example тестовый
+            # config-server может читать конфиги из ТОГО ЖЕ ./infrastructure/config-server, что и
+            # боевой, а не из отдельной копии под /opt/motul-test) - поэтому не роняем деплой, если
+            # каталог здесь не найден или git pull не удался.
+            (cd /opt/motul-test/infrastructure/config-server 2>/dev/null && git pull --ff-only) || true
             cd /opt/motul-test
             docker compose --env-file .env.test -f docker-compose.test.yml build --no-cache ${{ steps.meta.outputs.service }}
             docker compose --env-file .env.test -f docker-compose.test.yml rm -sf ${{ steps.meta.outputs.service }}
