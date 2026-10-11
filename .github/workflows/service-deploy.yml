@@ -82,3 +82,8 @@ jobs:
             docker compose build --no-cache ${{ steps.meta.outputs.service }}
             docker compose rm -sf ${{ steps.meta.outputs.service }}
             docker compose up -d ${{ steps.meta.outputs.service }}
+            # Сборка всегда --no-cache: прежний образ сервиса становится «висячим», кэш сборки не нужен -
+            # без очистки кэш дорос до 20 ГБ (2026-10, диск 86%). Только неиспользуемое и старше часа -
+            # сборки параллельных деплоев не задеваем.
+            docker image prune -f --filter "until=1h" >/dev/null 2>&1 || true
+            docker builder prune -af --filter "until=1h" >/dev/null 2>&1 || true
