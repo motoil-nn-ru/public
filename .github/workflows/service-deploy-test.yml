@@ -82,7 +82,10 @@ jobs:
             cd /opt/motul-test
             docker compose --env-file .env.test -f docker-compose.test.yml build --no-cache ${{ steps.meta.outputs.service }}
             docker compose --env-file .env.test -f docker-compose.test.yml rm -sf ${{ steps.meta.outputs.service }}
-            docker compose --env-file .env.test -f docker-compose.test.yml up -d ${{ steps.meta.outputs.service }}
+            # --no-deps: поднимаем только свой сервис. Без него compose пересоздавал и зависимости, если их конфигурация
+            # изменилась (общий .env) - параллельные деплои пересоздавали одни и те же контейнеры и оставляли их
+            # в «Created» (2026-10-11: customer/order/portal на тесте лежали после четырёх деплоев разом).
+            docker compose --env-file .env.test -f docker-compose.test.yml up -d --no-deps ${{ steps.meta.outputs.service }}
             # Сборка всегда --no-cache: прежний образ сервиса становится «висячим», кэш сборки не нужен -
             # без очистки каждый деплой оставлял на диске ~0,5 ГБ (2026-10: хост заполнился до 91%).
             # Только неиспользуемое и старше часа - сборки параллельных деплоев не задеваем.
