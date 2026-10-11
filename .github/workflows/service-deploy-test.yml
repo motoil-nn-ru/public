@@ -83,3 +83,8 @@ jobs:
             docker compose --env-file .env.test -f docker-compose.test.yml build --no-cache ${{ steps.meta.outputs.service }}
             docker compose --env-file .env.test -f docker-compose.test.yml rm -sf ${{ steps.meta.outputs.service }}
             docker compose --env-file .env.test -f docker-compose.test.yml up -d ${{ steps.meta.outputs.service }}
+            # Сборка всегда --no-cache: прежний образ сервиса становится «висячим», кэш сборки не нужен -
+            # без очистки каждый деплой оставлял на диске ~0,5 ГБ (2026-10: хост заполнился до 91%).
+            # Только неиспользуемое и старше часа - сборки параллельных деплоев не задеваем.
+            docker image prune -f --filter "until=1h" >/dev/null 2>&1 || true
+            docker builder prune -af --filter "until=1h" >/dev/null 2>&1 || true
