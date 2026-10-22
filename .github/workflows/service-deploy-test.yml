@@ -21,6 +21,14 @@ on:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    # Обычная выкатка - до 5 мин (сборка jar ~1-4 мин, перезапуск ~20 с). Зависшая сборка висела бы до 6 ч
+    # (2026-10-22: customer-service hotfix, «Publish to Nexus» > 15 мин) - обрываем раньше.
+    timeout-minutes: 20
+    # Запуски одного сервиса - по очереди: параллельные публиковали одну версию и падали на
+    # «cannot be updated» (2026-10-21, max-bot-service). Следующий в очереди увидит jar в Nexus и пропустит сборку.
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.repository }}
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
 
@@ -52,10 +60,17 @@ jobs:
         with:
           java-version: '25'
           distribution: 'temurin'
-          cache: 'gradle'
+
+      # Кэш Gradle (дистрибутив, зависимости, build cache) полнее, чем cache: 'gradle' у setup-java.
+      - uses: gradle/actions/setup-gradle@v4
+        if: steps.check.outputs.exists == 'false'
+        with:
+          # Тест выкатывается из development, не из ветки по умолчанию - иначе кэш только читался бы.
+          cache-read-only: false
 
       - name: Publish to Nexus
         if: steps.check.outputs.exists == 'false'
+        timeout-minutes: 10
         run: |
           chmod +x gradlew
           ./gradlew publish \
@@ -63,7 +78,7 @@ jobs:
             -PmotulNexusPublishingUrl="https://${{ secrets.NEXUS_HOST }}/repository/maven-releases/" \
             -PmotulNexusUser="${{ secrets.NEXUS_USER }}" \
             -PmotulNexusPassword="${{ secrets.NEXUS_PASSWORD }}" \
-            -x test
+            -x test --build-cache
 
       - name: Deploy to test server
         uses: appleboy/ssh-action@v1
