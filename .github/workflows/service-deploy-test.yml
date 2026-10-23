@@ -20,7 +20,9 @@ on:
 
 jobs:
   build-and-deploy:
-    runs-on: ubuntu-latest
+    # Свой раннер motul-build-1 (контейнер gh-runner на тестовом хосте, в РФ): с раннеров GitHub загрузка jar
+    # в Nexus шла до 50 мин (2026-10-22, 113 МБ из США). Раннер лежит - задания ждут; временный откат - ubuntu-latest.
+    runs-on: [self-hosted, motul-build]
     # Обычная выкатка - до 5 мин (сборка jar ~1-4 мин, перезапуск ~20 с). Зависшая сборка висела бы до 6 ч
     # (2026-10-22: customer-service hotfix, «Publish to Nexus» > 15 мин) - обрываем раньше.
     timeout-minutes: 20
@@ -67,6 +69,8 @@ jobs:
         with:
           # Тест выкатывается из development, не из ветки по умолчанию - иначе кэш только читался бы.
           cache-read-only: false
+          # Свой раннер: ~/.gradle и так живёт между запусками, а кэш Actions качается с серверов GitHub - медленно.
+          cache-disabled: ${{ runner.environment == 'self-hosted' }}
 
       - name: Publish to Nexus
         if: steps.check.outputs.exists == 'false'
@@ -81,13 +85,18 @@ jobs:
             -x test --build-cache
 
       - name: Deploy to test server
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.TEST_DEPLOY_HOST }}
-          username: ${{ secrets.TEST_DEPLOY_USER }}
-          key: ${{ secrets.TEST_DEPLOY_SSH_KEY }}
-          port: ${{ secrets.TEST_DEPLOY_PORT }}
-          script: |
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.TEST_DEPLOY_SSH_KEY }}
+        run: |
+          # Обычный ssh вместо appleboy/ssh-action: тот - docker-экшен, своему раннеру понадобился бы docker-сокет
+          # (= root на хосте). Ключ - во временном каталоге задания, удаляется сразу после.
+          KEY="$RUNNER_TEMP/deploy_key"; (umask 077; printf '%s\n' "$DEPLOY_SSH_KEY" > "$KEY"); trap 'rm -f "$KEY"' EXIT
+          # Ключ хоста закреплён (HostKeyAlias - адрес сервера остаётся в секретах). Сменился ключ сервера -
+          # деплой упадёт с «Host key verification failed»: обновить строку ниже (ssh-keyscan -t ed25519).
+          echo 'motul-test ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIH5QSE0KSp3St8SdDb5T/wEQFVX+duAAsLNp+Azk1NBD' > "$RUNNER_TEMP/known_hosts"
+          ssh -i "$KEY" -p "${{ secrets.TEST_DEPLOY_PORT }}" -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o HostKeyAlias=motul-test -o UserKnownHostsFile="$RUNNER_TEMP/known_hosts" \
+            "${{ secrets.TEST_DEPLOY_USER }}@${{ secrets.TEST_DEPLOY_HOST }}" 'bash -s' <<'DEPLOY'
             # См. комментарий в service-deploy.yml (Reusable Deploy) - тот же разрыв, тот же фикс.
             # Путь тестового checkout config-server не подтверждён (по .env.test.example тестовый
             # config-server может читать конфиги из ТОГО ЖЕ ./infrastructure/config-server, что и
@@ -106,3 +115,4 @@ jobs:
             # Только неиспользуемое и старше часа - сборки параллельных деплоев не задеваем.
             docker image prune -f --filter "until=1h" >/dev/null 2>&1 || true
             docker builder prune -af --filter "until=1h" >/dev/null 2>&1 || true
+          DEPLOY
