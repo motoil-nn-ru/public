@@ -21,8 +21,12 @@ done
 
 version=$(git show "$sha:version.properties" 2>/dev/null | sed -n 's/^version=//p' | tr -d '[:space:]')
 [ -n "$version" ] || exit 0
-# Имя артефакта = имя репозитория, как в CI (github.event.repository.name)
 name=$(basename "$(git remote get-url origin)" .git)
+# Артефакты: модули из include в settings.gradle (libs: common, database, ...),
+# а у сервиса без модулей - имя репозитория, как в CI (github.event.repository.name)
+artifacts=$(git show "$sha:settings.gradle" 2>/dev/null | grep -E '^[[:space:]]*include' \
+    | grep -oE "['\"][^'\"]+['\"]" | tr -d "'\"" | sed 's/.*://')
+[ -n "$artifacts" ] || artifacts=$name
 
 props="$HOME/.gradle/gradle.properties"
 prop() { sed -n "s/^$1=//p" "$props" 2>/dev/null | head -1; }
@@ -34,11 +38,15 @@ if [ -z "$nexus" ] || [ -z "$user" ]; then
     exit 0
 fi
 
-# Версия уже в Nexus (например, слияние development -> main) - собирать нечего
-found=$(curl -s -m 15 -u "$user:$password" \
-    "$nexus/service/rest/v1/search/assets?repository=maven-releases&maven.groupId=ru.motoil-nn&maven.artifactId=$name&maven.baseVersion=$version&maven.extension=jar" \
-    | grep -c '"downloadUrl"')
-if [ "${found:-0}" -gt 0 ]; then
+# Версия уже в Nexus у всех артефактов (например, слияние development -> main) - собирать нечего
+missing=
+for a in $artifacts; do
+    found=$(curl -s -m 15 -u "$user:$password" \
+        "$nexus/service/rest/v1/search/assets?repository=maven-releases&maven.groupId=ru.motoil-nn&maven.artifactId=$a&maven.baseVersion=$version&maven.extension=jar" \
+        | grep -c '"downloadUrl"')
+    [ "${found:-0}" -gt 0 ] || missing="$missing $a"
+done
+if [ -z "$missing" ]; then
     echo "[pre-push] $name $version уже в Nexus"
     exit 0
 fi
