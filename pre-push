@@ -1,0 +1,61 @@
+#!/bin/bash
+# pre-push: при push в development/main собирает jar отправляемого коммита и публикует его в Nexus.
+# CI (service-deploy*.yml) видит jar этой версии в Nexus, пропускает сборку и сразу выкатывает.
+# Сборка - из чистой копии коммита (git worktree), не из рабочей: незакоммиченное в jar не попадёт.
+# Не вышло (нет Java/доступа к Nexus, ошибка сборки) - push всё равно уходит, jar соберёт раннер CI.
+# Пропустить один раз: MOTUL_SKIP_PUBLISH=1 git push
+
+[ -n "$MOTUL_SKIP_PUBLISH" ] && exit 0
+root=$(git rev-parse --show-toplevel)
+[ -f "$root/version.properties" ] && [ -f "$root/gradlew" ] || exit 0
+
+zero=0000000000000000000000000000000000000000
+sha=
+while read -r _ local_sha remote_ref _; do
+    case "$remote_ref" in refs/heads/development|refs/heads/main|refs/heads/master) ;; *) continue ;; esac
+    [ "$local_sha" = "$zero" ] && continue
+    sha=$local_sha
+    break
+done
+[ -n "$sha" ] || exit 0
+
+version=$(git show "$sha:version.properties" 2>/dev/null | sed -n 's/^version=//p' | tr -d '[:space:]')
+[ -n "$version" ] || exit 0
+# Имя артефакта = имя репозитория, как в CI (github.event.repository.name)
+name=$(basename "$(git remote get-url origin)" .git)
+
+props="$HOME/.gradle/gradle.properties"
+prop() { sed -n "s/^$1=//p" "$props" 2>/dev/null | head -1; }
+nexus=$(prop motulNexusUrl | sed -E 's#^(https?://[^/]+).*#\1#')
+user=$(prop motulNexusUser)
+password=$(prop motulNexusPassword)
+if [ -z "$nexus" ] || [ -z "$user" ]; then
+    echo "[pre-push] нет настроек Nexus в $props - jar соберёт CI"
+    exit 0
+fi
+
+# Версия уже в Nexus (например, слияние development -> main) - собирать нечего
+found=$(curl -s -m 15 -u "$user:$password" \
+    "$nexus/service/rest/v1/search/assets?repository=maven-releases&maven.groupId=ru.motoil-nn&maven.artifactId=$name&maven.baseVersion=$version&maven.extension=jar" \
+    | grep -c '"downloadUrl"')
+if [ "${found:-0}" -gt 0 ]; then
+    echo "[pre-push] $name $version уже в Nexus"
+    exit 0
+fi
+
+tmp=$(mktemp -d)
+log="$tmp.log"
+cleanup() { git worktree remove --force "$tmp/src" >/dev/null 2>&1; rm -rf "$tmp"; }
+trap cleanup EXIT
+git worktree add --detach -q "$tmp/src" "$sha" || exit 0
+
+echo "[pre-push] сборка и публикация $name $version в Nexus..."
+start=$(date +%s)
+if (cd "$tmp/src" && ./gradlew publish -x test -q --console=plain </dev/null) >"$log" 2>&1; then
+    echo "[pre-push] $name $version опубликован за $(( $(date +%s) - start )) с - CI только выкатит"
+    rm -f "$log"
+else
+    echo "[pre-push] публикация не удалась - jar соберёт CI. Последние строки ($log):"
+    tail -15 "$log"
+fi
+exit 0
